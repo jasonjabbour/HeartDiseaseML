@@ -1,0 +1,27 @@
+---
+title: "" 
+author: ""
+fontsize: 12pt
+geometry: margin=1in
+urlcolor: black
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, highlight=FALSE)
+```
+
+
+## Import
+```{r}
+
+install.packages("xlsx")
+library("xlsx")
+
+heart_data = read.xlsx("heart_data.xlsx",1,header=T)
+
+head(heart_data)
+```
+
+
