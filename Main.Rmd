@@ -17,10 +17,14 @@ knitr::opts_chunk$set(echo = TRUE, highlight=FALSE)
 ```{r}
 
 #install.packages("xlsx")
-library("xlsx")
+#install.packages("ridge")
+#install.packages("VIF")
 library(ggplot2)
+library(tidyverse)
+library(ridge)
+library(VIF)
 
-heart_data = read.xlsx("heart_data.xlsx",1,header=T)
+heart_data = read.csv("heart_data.csv",header=T)
 
 head(heart_data)
 ```
@@ -45,3 +49,64 @@ heart_data %>% ggplot(aes(x=age,y=max_heart_rate_achieved,color=as.factor(thal))
   geom_point()
 
 ```
+
+## Linear Regression
+```{r}
+
+corr_data = heart_data[,c(-15,-1,-3)]
+round(cor(corr_data),2)
+
+set.seed(152021)
+#randomly split data into training and testing data
+trainingIndex = sample(1:nrow(corr_data),.8*nrow(corr_data))
+#save training data
+trainingData = heart_data[trainingIndex, ]
+#save testing data
+testData = heart_data[-trainingIndex, ]
+
+
+#Predict using linear regression
+linearModel = lm(heart_disease_present ~ ., trainingData)
+
+summary(linearModel)
+
+```
+
+
+## Logistic Regression 
+```{r}
+
+#copy
+heart_data2 = heart_data[,-1] #everything except id
+
+#change categorical data to factors
+heart_data2$slope_of_peak_exercise_st_segment = as.factor(heart_data2$slope_of_peak_exercise_st_segment)
+heart_data2$thal = as.factor(heart_data2$thal)
+heart_data2$chest_pain_type = as.factor(heart_data2$chest_pain_type)
+heart_data2$num_major_vessels = as.factor(heart_data2$num_major_vessels)
+heart_data2$fasting_blood_sugar_gt_120_mg_per_dl = as.factor(heart_data2$fasting_blood_sugar_gt_120_mg_per_dl)
+heart_data2$resting_ekg_results = as.factor(heart_data2$resting_ekg_results)
+heart_data2$sex = as.factor(heart_data2$sex)
+heart_data2$exercise_induced_angina = as.factor(heart_data2$exercise_induced_angina)
+heart_data2$heart_disease_present = as.factor(heart_data2$heart_disease_present)
+
+head(heart_data2)
+
+#sanity check
+table(heart_data2$slope_of_peak_exercise_st_segment)
+
+heart_data2 %>% ggplot(aes(x=heart_disease_present,y=slope_of_peak_exercise_st_segment, fill=slope_of_peak_exercise_st_segment)) + 
+  geom_bar(stat="identity")
+
+#logistic regression (use binomial for logistic reg)
+#model heart disease using all variables: ~.
+logistic_model = glm(heart_disease_present ~ .,data=heart_data2,family="binomial")
+
+summary(logistic_model)
+
+
+#cross validation
+#SVM, KNN, Logistic Regression
+
+```
+
