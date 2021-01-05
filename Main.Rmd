@@ -16,8 +16,9 @@ knitr::opts_chunk$set(echo = TRUE, highlight=FALSE)
 ## Import
 ```{r}
 
-install.packages("xlsx")
+#install.packages("xlsx")
 library("xlsx")
+library(ggplot2)
 
 heart_data = read.xlsx("heart_data.xlsx",1,header=T)
 
@@ -25,3 +26,22 @@ head(heart_data)
 ```
 
 
+## Developing Intuition
+```{r}
+#Age, Max Heart Rate Achieved, Sex
+heart_data %>% ggplot(aes(x=age,y=max_heart_rate_achieved,color=as.factor(exercise_induced_angina)))+
+  geom_point()+facet_grid(~sex)
+
+#Resting Blood Pressure, Max Heart Rate, Chest Paint Type
+heart_data %>% ggplot(aes(x=resting_blood_pressure,y=max_heart_rate_achieved,color=as.factor(chest_pain_type)))+
+  geom_point()
+
+#Resting Blood Pressure, Max Heart Rate, Angina
+heart_data %>% ggplot(aes(x=resting_blood_pressure,y=max_heart_rate_achieved,color=as.factor(exercise_induced_angina)))+
+  geom_point()
+
+#Age, Max Heart Rate, Thal
+heart_data %>% ggplot(aes(x=age,y=max_heart_rate_achieved,color=as.factor(thal)))+
+  geom_point()
+
+```
