@@ -19,10 +19,15 @@ knitr::opts_chunk$set(echo = TRUE, highlight=FALSE)
 #install.packages("xlsx")
 #install.packages("ridge")
 #install.packages("VIF")
+#install.packages("corrplot")
+#install.packages("GoodmanKruskal")
 library(ggplot2)
 library(tidyverse)
+library(dplyr)
 library(ridge)
 library(VIF)
+library(corrplot)
+library(GoodmanKruskal)
 
 heart_data = read.csv("heart_data.csv",header=T)
 
@@ -104,9 +109,113 @@ logistic_model = glm(heart_disease_present ~ .,data=heart_data2,family="binomial
 
 summary(logistic_model)
 
+#graph Variable P Values -------------
+coef_matrix = coef(summary(logistic_model))
+coef_df = as.data.frame(coef_matrix)
+coef_df = coef_df[-1,]
+
+a = ifelse(coef_df$`Pr(>|z|)`<.05,"#16324F","#68C5DB")
+a
+
+coef_df %>% ggplot(aes(x=rownames(coef_df),y=`Pr(>|z|)`))+
+  geom_bar(stat = "identity",fill=a) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, color=a)) +
+  geom_hline(yintercept = .05,color="#16324F") +
+  geom_text(aes(22,.05,label="P-value <.05",vjust=-.6,hjust=1.1),size=3.5,color="#16324F")
+
+#significant variables
+coef_df[coef_df$`Pr(>|z|)`<.05,]
+
 
 #cross validation
 #SVM, KNN, Logistic Regression
 
 ```
 
+## Correlation Matrix
+```{r}
+
+#Right way...dont use any categorical data 
+str(heart_data2)
+heart_data3 = heart_data2[,c(-1,-2,-4,-5,-6,-7,-10,-13)]
+
+#since hd present is categorical but we need it...
+heart_data3$heart_disease_present = as.numeric(heart_data3$heart_disease_present)
+str(heart_data3)
+
+colnames(heart_data3) <- c("Rest BP","Cholest","Old Peak","Age","Max HR","HD Present")
+#colnames(heart_data3) <- c("Peak Slope","Rest BP","Chest Pain","Num Vessels","Fast Sugar","Rest EKG","Chol","Old Peak","Sex","Age","Max HR","Exercise AG","HD")
+
+#Color Corr Matrix
+fig1 = corrplot(cor(heart_data3),method="color",tl.col="black",tl.cex= .6,title="Correlation Matrix of Numeric Variables",mar=c(0,0,2.5,0),col=colorRampPalette(c("#FFBFBF","#BFBFFF","#FFFFFF","#CF8FCF","#CF8FBF"))(200))
+
+#Number Corr Matrix
+fig1 = corrplot(cor(heart_data3),method="number",tl.col="black",tl.cex= .6,title="Correlation Matrix of Numeric Variables",mar=c(0,0,2.5,0),col=colorRampPalette(c("#FFBFBF","#BFBFFF","#FFFFFF","#CF8FCF","#CF8FBF"))(200))
+
+#Pearson's Chisquared Test of independence (significance test)
+chi1 = chisq.test(heart_data2$slope_of_peak_exercise_st_segment,heart_data2$heart_disease_present,  correct = F)
+
+chi2 = chisq.test(heart_data2$thal,heart_data2$heart_disease_present,  correct = F)
+
+chi3 = chisq.test(heart_data2$chest_pain_type,heart_data2$heart_disease_present,  correct = F)
+
+chi4 = chisq.test(heart_data2$num_major_vessels,heart_data2$heart_disease_present,  correct = F)
+
+chi5 = chisq.test(heart_data2$fasting_blood_sugar_gt_120_mg_per_dl,heart_data2$heart_disease_present,  correct = F)
+
+chi6 = chisq.test(heart_data2$resting_ekg_results,heart_data2$heart_disease_present,  correct = F)
+
+chi7 = chisq.test(heart_data2$sex,heart_data2$heart_disease_present,  correct = F)
+
+chi8 = chisq.test(heart_data2$exercise_induced_angina,heart_data2$heart_disease_present,  correct = F)
+
+#put p values in a data matrix
+chisqrdtst_pvals = matrix(c(chi1$p.value,
+       chi2$p.value,
+       chi3$p.value,
+       chi4$p.value,
+       chi5$p.value,
+       chi6$p.value,
+       chi7$p.value,
+       chi8$p.value),
+       nrow = 8, ncol = 1, byrow = T)
+chisqrdtst_pvals
+#format
+chisqrdtst_pvals = as.data.frame(chisqrdtst_pvals)
+colnames(chisqrdtst_pvals) <- c("PValue")
+rownames(chisqrdtst_pvals) <- c("Slope Peak ST Seg.","Thal","Chest Pain TYpe","Num Vessels",
+       "Fast. Bld Sugr","Rest. EKG","Sex","Exc. Ind. Pain")
+chisqrdtst_pvals = cbind(Variable = rownames(chisqrdtst_pvals),chisqrdtst_pvals)
+chisqrdtst_pvals
+
+
+#make color vector
+a = ifelse(chisqrdtst_pvals$PValue<.05,"Dependent","Independent")
+chisqrdtst_pvals = cbind(ColorIfIndependent = as.factor(a), chisqrdtst_pvals)
+chisqrdtst_pvals
+
+chisqrdtst_pvals %>% ggplot(aes(x=Variable,y=PValue,color=ColorIfIndependent))+
+  geom_point()+ theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+  geom_hline(yintercept = .05,color="#16324F",linetype="dashed",size =1)+
+  geom_text(aes(10,.05,label="P-value <.05",vjust=-.6,hjust=1.1),size=3.5,color="#16324F")+
+  labs(title="Pearson's Chi-Squared Test of Independence")+
+  labs(subtitle = "Heart Disease Dependent or Independent of the Listed Categorical Variable")
+
+#Effect Size Strength Association Test -- Goodman and Kruskal Tau --------
+
+varset1 = c("slope_of_peak_exercise_st_segment","thal","chest_pain_type","num_major_vessels",
+       "fasting_blood_sugar_gt_120_mg_per_dl","resting_ekg_results","sex","exercise_induced_angina","heart_disease_present")
+
+GKmatrix = subset(heart_data2, select = varset1)
+GKmatrix
+colnames(GKmatrix) <- c("Slope Peak ST Seg.","Thal","Chest Pain Type","Num Vessels",
+       "Fast. Bld Sugr","Rest. EKG","Sex","Exc. Ind. Pain","HD Present")
+GKmatrix <- GKtauDataframe(GKmatrix)
+
+#Strength of Association Plot
+plot(GKmatrix,corrColors = "#16324F", main="Strength Of Association Plot using Goodman and Kruskal's Tau")
+#k refers to the number of unique levels for each variable
+# there are no variables that are perfectly predictable (no strong association betweeen two variables)
+
+
+```
