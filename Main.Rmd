@@ -21,6 +21,10 @@ knitr::opts_chunk$set(echo = TRUE, highlight=FALSE)
 #install.packages("VIF")
 #install.packages("corrplot")
 #install.packages("GoodmanKruskal")
+#install.packages("randomForest")
+#install.packages("caTools")
+#install.packages("performance")
+#install.packages("expss")
 library(ggplot2)
 library(tidyverse)
 library(dplyr)
@@ -28,10 +32,21 @@ library(ridge)
 library(VIF)
 library(corrplot)
 library(GoodmanKruskal)
+library(randomForest)
+library(caTools)
+library(performance)
+library(expss)
 
+#Choose which dataset to use
 heart_data = read.csv("heart_data.csv",header=T)
 
+heart_data = read.csv("heart_data_all.csv",header=T)
+
+#look at data
+str(heart_data)
 head(heart_data)
+
+my_seed = 152021
 ```
 
 
@@ -61,7 +76,7 @@ heart_data %>% ggplot(aes(x=age,y=max_heart_rate_achieved,color=as.factor(thal))
 corr_data = heart_data[,c(-15,-1,-3)]
 round(cor(corr_data),2)
 
-set.seed(152021)
+set.seed(my_seed)
 #randomly split data into training and testing data
 trainingIndex = sample(1:nrow(corr_data),.8*nrow(corr_data))
 #save training data
@@ -81,56 +96,337 @@ summary(linearModel)
 ## Logistic Regression 
 ```{r}
 
+
+#FORMAT DF -------------------------------------------------------------------------------------------------
 #copy
-heart_data2 = heart_data[,-1] #everything except id
+#heart_data2 = heart_data[,c(-1,-7,-8)] #everything except id, fasting blood, and rest ekg 
+heart_data2 = heart_data[,c(-6)] #everything except id, fasting blood, and rest ekg 
+#heart_data2 = heart_data #everything except id, fasting blood, and rest ekg 
 
 #change categorical data to factors
 heart_data2$slope_of_peak_exercise_st_segment = as.factor(heart_data2$slope_of_peak_exercise_st_segment)
 heart_data2$thal = as.factor(heart_data2$thal)
 heart_data2$chest_pain_type = as.factor(heart_data2$chest_pain_type)
 heart_data2$num_major_vessels = as.factor(heart_data2$num_major_vessels)
-heart_data2$fasting_blood_sugar_gt_120_mg_per_dl = as.factor(heart_data2$fasting_blood_sugar_gt_120_mg_per_dl)
-heart_data2$resting_ekg_results = as.factor(heart_data2$resting_ekg_results)
+#heart_data2$fasting_blood_sugar_gt_120_mg_per_dl = as.factor(heart_data2$fasting_blood_sugar_gt_120_mg_per_dl)
+##heart_data2$resting_ekg_results = as.factor(heart_data2$resting_ekg_results)
 heart_data2$sex = as.factor(heart_data2$sex)
 heart_data2$exercise_induced_angina = as.factor(heart_data2$exercise_induced_angina)
 heart_data2$heart_disease_present = as.factor(heart_data2$heart_disease_present)
+#change ekg to only 2 levels 
+# heart_data2 = heart_data2 %>% mutate(resting_ekg_results = ifelse(resting_ekg_results>1,1,0))
+# heart_data2$resting_ekg_results = as.factor(heart_data2$resting_ekg_results)
 
-head(heart_data2)
 
 #sanity check
-table(heart_data2$slope_of_peak_exercise_st_segment)
+# table(heart_data2$slope_of_peak_exercise_st_segment)
+# 
+# heart_data2 %>% ggplot(aes(x=heart_disease_present,y=slope_of_peak_exercise_st_segment, fill=slope_of_peak_exercise_st_segment)) + 
+#   geom_bar(stat="identity")
 
-heart_data2 %>% ggplot(aes(x=heart_disease_present,y=slope_of_peak_exercise_st_segment, fill=slope_of_peak_exercise_st_segment)) + 
-  geom_bar(stat="identity")
+#check for na values
+sapply(heart_data2, function(x) sum(is.na(x)))
+# we have no na values
 
-#logistic regression (use binomial for logistic reg)
-#model heart disease using all variables: ~.
-logistic_model = glm(heart_disease_present ~ .,data=heart_data2,family="binomial")
+backupdf = heart_data2 
 
-summary(logistic_model)
+# #Feature Engineering -----------------------------
+# heart_data = read.csv("log_df.csv",header=T)
+# heart_data2 = heart_data
+#--------------------------------------------------
+#--------------------------------------------------
 
-#graph Variable P Values -------------
-coef_matrix = coef(summary(logistic_model))
-coef_df = as.data.frame(coef_matrix)
-coef_df = coef_df[-1,]
+iters = 100
+empt = seq(-1,-1,length=iters)
+logistic_resultsDF = data.frame(overall_accuracy=empt,FP=empt,FN=empt,TN=empt,TP=empt,rmse=empt,AIC=empt)
 
-a = ifelse(coef_df$`Pr(>|z|)`<.05,"#16324F","#68C5DB")
-a
+i = 0 
+for (i in 1:iters){
+  heart_data2 = backupdf
+  i
+  #split data -------------------------------
+  set.seed(my_seed+i)
+  
+  #randomly split data into training and testing data 80% train
+  trainingIndex = sample(1:nrow(heart_data2),.8*nrow(heart_data2))
+  #save training data
+  trainingData = heart_data2[trainingIndex, ]
+  #save testing data
+  testData = heart_data2[-trainingIndex, ]
+  
+  #logistic regression (use binomial for logistic reg)
+  #model heart disease using all variables: ~.
+  logistic_model = glm(heart_disease_present ~ .,family="binomial",data=trainingData)
 
-coef_df %>% ggplot(aes(x=rownames(coef_df),y=`Pr(>|z|)`))+
-  geom_bar(stat = "identity",fill=a) +
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, color=a)) +
-  geom_hline(yintercept = .05,color="#16324F") +
-  geom_text(aes(22,.05,label="P-value <.05",vjust=-.6,hjust=1.1),size=3.5,color="#16324F")
+  #get rmse
+  perf = model_performance(logistic_model)
+  #add to results df
+  logistic_resultsDF[i,'rmse']=perf$RMSE
+  logistic_resultsDF[i,'AIC']=perf$AIC
+  
+  summary(logistic_model)
+  
+  #Test Model -----------------------------------------------
+  
+  #dont have to do this
+  heart_disease_present = testData$heart_disease_present
+  testData = testData[,-12]
+  #For 
+  #testData = testData[,-17]
+  #for log
+  #testData = testData[,-18]
+  
+  #using the model we made, add the probability of HD for each row
+  testData$model_prob = predict(logistic_model, testData, type = "response")
+  
+  #add col back to dataset
+  testData = cbind(testData,heart_disease_present)
 
-#significant variables
-coef_df[coef_df$`Pr(>|z|)`<.05,]
+  #make binary based on probability
+  testData = testData %>% mutate(model_pred = 1*(model_prob >.6)+0)
+
+  #get accuracy of our model for our test data
+  testData = testData %>% mutate(accurate = 1*(model_pred == heart_disease_present))
+  overall_accuracy = sum(testData$accurate)/nrow(testData)
+  sum(testData$accurate)
+  #add accuracy 
+  logistic_resultsDF[i,'overall_accuracy']= overall_accuracy
+
+  
+  #calculate false positives (HD when no HD)
+  testData = testData %>% mutate(false_positve = as.numeric(((model_pred == 1) & (heart_disease_present == 0))))
+  sum(testData$false_positve)/nrow(testData)
+  FP = sum(testData$false_positve)
+  #5.5% False Positve
+  #add  
+  logistic_resultsDF[i,'FP']=FP
+
+  
+  #calculate false negative (no HD when HD)
+  testData = testData %>% mutate(false_negatvie = as.numeric(((model_pred == 0) & (heart_disease_present == 1))))
+  sum(testData$false_negatvie)/nrow(testData)
+  FN = sum(testData$false_negatvie)
+  #11% False Negative
+  logistic_resultsDF[i,'FN']=FN
+
+  
+  #calculate true negative (no HD when no HD)
+  testData = testData %>% mutate(true_negative = as.numeric(((model_pred == 0) & (heart_disease_present == 0))))
+  sum(testData$true_negative)/nrow(testData)
+  TN = sum(testData$true_negative)
+  logistic_resultsDF[i,'TN']=TN
+
+  
+  #calculate true postive (HD when HD)
+  testData = testData %>% mutate(true_positive = as.numeric(((model_pred == 1) & (heart_disease_present == 1))))
+  sum(testData$true_positive)/nrow(testData)
+  TP = sum(testData$true_positive)
+  logistic_resultsDF[i,'TP']=TP
+  
+}
+
+logistic_resultsDF
+
+#stats
+mean(logistic_resultsDF$overall_accuracy)
+var(logistic_resultsDF$overall_accuracy)
+sd(logistic_resultsDF$overall_accuracy)
+median(logistic_resultsDF$overall_accuracy)
+mean(logistic_resultsDF$rmse)
+
+ggplot(logistic_resultsDF,aes(x=1:100,y=overall_accuracy))+
+  geom_point()+ylim(0,1)
+```
 
 
-#cross validation
-#SVM, KNN, Logistic Regression
+## Random Forest
+```{r}
+#copy
+heart_dataRF = heart_data2
+heart_dataRF
+
+iters = 100
+empt = seq(-1,-1,length=iters)
+RF_resultsDF = data.frame(overall_accuracy=empt,FP=empt,FN=empt,TN=empt,TP=empt,rmse=empt,AIC=empt)
+
+#for exploration purposes
+mtry_oob = vector(length=iters)
+
+i = 0 
+for (i in 1:iters){
+  
+  #Split data
+  set.seed(my_seed+i)
+  
+  #randomly split data into training and testing data 80% train
+  splitDataTraining = sample(1:nrow(heart_dataRF),.8*nrow(heart_dataRF))
+  #save training data
+  trainingDataRF = heart_dataRF[splitDataTraining, ]
+  #save testing data
+  testDataRF = heart_dataRF[-splitDataTraining, ]
+  
+  #initialize random forest instance
+  RFmodel = randomForest(heart_disease_present ~.,data=trainingDataRF,ntree=500,mtry=2,proximity=T)
+  
+  #look at confusion matrix
+  RFmodel
+  
+  #use model to predict test model, dont pass in answer (CHANGE NUM)
+  predictedDataRF = predict(RFmodel, newdata = testDataRF[,-12])
+  
+  #CHANGE NUM
+  confusionMatrix = table(testDataRF[,12],predictedDataRF)
+  confusionMatrix
+  nrow(testDataRF)
+  
+  
+  #for engineered df ---------------------------------------
+  predCol = as.vector(predictedDataRF)
+  predCol = as.numeric(predCol)
+  predCol
+  testDataRF = cbind(testDataRF,predictedDataRF)
+  
+  #make binary based on probability
+  testDataRF = testDataRF %>% mutate(model_pred = 1*(predCol >.5)+0)
+  testDataRF
+  
+  #get accuracy of our model for our test data
+  testDataRF = testDataRF %>% mutate(accurate = 1*(model_pred == heart_disease_present))
+  overall_accuracy = sum(testDataRF$accurate)/nrow(testDataRF)
+  RF_resultsDF[i,'overall_accuracy']= overall_accuracy
+  
+  #calculate false positives (HD when no HD)
+  testDataRF = testDataRF %>% mutate(false_positve = as.numeric(((model_pred == 1) & (heart_disease_present == 0))))
+  sum(testDataRF$false_positve)/nrow(testData)
+  FP = sum(testDataRF$false_positve)
+  RF_resultsDF[i,'FP']=FP  
+
+  #calculate false negative (no HD when HD)
+  testDataRF = testDataRF %>% mutate(false_negatvie = as.numeric(((model_pred == 0) & (heart_disease_present == 1))))
+  sum(testDataRF$false_negatvie)/nrow(testData)
+  FN = sum(testDataRF$false_negatvie)
+  RF_resultsDF[i,'FN']=FN
+
+  #calculate true negative (no HD when no HD)
+  testDataRF = testDataRF %>% mutate(true_negative = as.numeric(((model_pred == 0) & (heart_disease_present == 0))))
+  sum(testDataRF$true_negative)/nrow(testData)
+  TN = sum(testDataRF$true_negative)
+  RF_resultsDF[i,'TN']=TN
+
+  #calculate true postive (HD when HD)
+  testDataRF = testDataRF %>% mutate(true_positive = as.numeric(((model_pred == 1) & (heart_disease_present == 1))))
+  sum(testDataRF$true_positive)/nrow(testData)
+  TP = sum(testDataRF$true_positive)
+  RF_resultsDF[i,'TP']=TP
+
+}
+
+RF_resultsDF
+
+#stats
+(meanacc = mean(RF_resultsDF$overall_accuracy))
+(varacc = var(RF_resultsDF$overall_accuracy))
+(sdacc = sd(RF_resultsDF$overall_accuracy))
+(medianacc = median(RF_resultsDF$overall_accuracy))
+
+
+#plot our data
+ggplot(RF_resultsDF,aes(x=1:100,y=overall_accuracy))+
+  geom_point()+ylim(0,1)+ geom_smooth(method=lm, fill="blue",se=F)+
+  xlab("Iteration Number")+ylab("Overall Accuracy")+
+  scale_x_continuous(breaks = pretty(1:100,n =30)) +
+  labs(title="Random Forest Results for 100 Random Samples")
+
+FP = mean(RF_resultsDF$FP)
+FN = mean(RF_resultsDF$FN)
+TN = mean(RF_resultsDF$TN)
+TP = mean(RF_resultsDF$TP)
+
+
+#Check if enough trees -----------------------------
+RFmodel
+RFmodel$err.rate
+
+trees_analysis <- data.frame(
+  Number_of_Trees=rep(1:nrow(RFmodel$err.rate), times=3),
+  Key=rep(c("OOB", "0", "1"),
+  each=nrow(RFmodel$err.rate)),
+  OOB_Error=c(RFmodel$err.rate[,"OOB"], 
+    RFmodel$err.rate[,"0"], 
+    RFmodel$err.rate[,"1"]))
+#plot tree analysis
+trees_analysis %>% ggplot(aes(x=Number_of_Trees, y=OOB_Error)) +
+  geom_line(aes(color=Key))+labs(title="Effect of the Number of Trees on Out-of-Bag Error")
+
+#variable importance
+varImpPlot(RFmodel, main = "Variable Importance")
+
+#multi-dimensional scaling plot of proximity
+MDSplot(RFmodel,trainingData$heart_disease_present,main= "Multi-Dimensional Scaling Plot of Proximity")
 
 ```
+
+## Optimization of mTry Exploration
+```{r}
+#copy
+heart_dataRF = heart_data2
+
+iters1 = 15
+itersIn = 16
+#for exploration purposes
+mtry_oob1 = vector(length=iters1*itersIn)
+
+i = 0 
+count = 1
+for (i in 1:iters1){
+  
+  #without changing seed try changing mtry
+  for (j in 1:itersIn){
+    set.seed(my_seed+i+1)
+
+    #randomly split data into training and testing data 80% train
+    splitDataTraining = sample(1:nrow(heart_dataRF),.8*nrow(heart_dataRF))
+    #save training data
+    trainingDataRF = heart_dataRF[splitDataTraining, ]
+    #save testing data
+    testDataRF = heart_dataRF[-splitDataTraining, ]
+    
+    # #try a different amount of variables at each tree
+    RFmodel = randomForest(heart_disease_present ~.,data=trainingDataRF,ntree=500,mtry=j)
+    #save oob in vector (with the changed mtry)
+    mtry_oob1[count] = RFmodel$err.rate[nrow(RFmodel$err.rate),1]
+    count=count+1
+  }
+}
+
+#analyze mtry value
+mtry_oob1
+
+#split into each seed
+mtry_oob2 = split(mtry_oob1, ceiling(seq_along(mtry_oob1)/16))
+
+mtry_oob2 <- lapply(mtry_oob2, function(x) cbind(x = seq_along(x), y = x))
+
+list.names <- names(mtry_oob2)
+lns <- sapply(mtry_oob2, nrow)
+mtry_oob2 <- as.data.frame(do.call("rbind", mtry_oob2))
+mtry_oob2$group <- rep(list.names, lns)
+mtry_oob2
+
+mtry_oob2 %>% ggplot(aes(x = x, y = y, color = group)) +
+    geom_line()+xlab("mTry Number")+ylab("Out of Bag Error")+
+    scale_x_continuous(breaks = pretty(1:16,n =16)) +
+    labs(title="mTry Parameter Optimization")
+
+
+# ggplot(data=NULL,aes(x=1:160,y=mtry_oob1))+
+#   geom_point(color="blue")+geom_line()+xlab("mTry Number")+ylab("Out of Bag Error")+
+#   scale_x_continuous(breaks = pretty(1:100,n =160)) +
+#   scale_y_continuous(breaks = pretty(mtry_oob1,n = 50))+
+#   labs(title="mTry Parameter Optimization")
+
+```
+
 
 ## Correlation Matrix
 ```{r}
@@ -217,5 +513,84 @@ plot(GKmatrix,corrColors = "#16324F", main="Strength Of Association Plot using G
 #k refers to the number of unique levels for each variable
 # there are no variables that are perfectly predictable (no strong association betweeen two variables)
 
+
+```
+
+
+## Confusion Matrix
+```{r}
+
+Actual <- factor(c(0, 0, 1, 1))
+Predicted <- factor(c(0, 1, 0, 1))
+Y      <- c(TN,FP,FN,TP)
+df <- data.frame(Actual, Predicted, Y)
+
+ggplot(data =  df, mapping = aes(x = Actual, y = Predicted)) +
+  geom_tile(aes(fill = Y), colour = "white") +
+  geom_text(aes(label = sprintf("%1.0f", Y)), color = "white", vjust = 1,size=8) +
+  scale_fill_gradient(low = "darkturquoise", high = "deepskyblue4") +
+  theme_bw() + theme(legend.position = "none")
+
+```
+
+
+## Sandbox
+```{r}
+# #bootstrap data ---------------------------
+# bootstrap_data = heart_data2
+# 
+# #number of boostraps
+# nBoots = 10
+# bootResult = list()
+# for (i in seq_len(nBoots)){
+#   bootResult[[i]] = bootstrap_data[sample(seq_len(nrow(bootstrap_data)),nrow(bootstrap_data),replace=T),]
+# }
+# 
+# bootRowsDF = bind_rows(bootResult,.id="column_label")[,-1]
+# bootRowsDF
+# 
+# health_data2 = rbind(bootstrap_data,bootRowsDF)
+# health_data2
+
+
+# #--More---Feature Enginerring ---------------------------
+#make any level of thal above 1 abnormal
+# heart_data2$thal = as.integer(heart_data2$thal)
+# heart_data2 = heart_data2 %>% mutate(thal = ifelse(thal>1,2,1))
+# heart_data2$thal = as.factor(heart_data2$thal)
+# 
+# #make chest pain above 2, 2 elese 1
+# heart_data2$chest_pain_type = as.integer(heart_data2$chest_pain_type)
+# heart_data2 = heart_data2 %>% mutate(chest_pain_type = ifelse(chest_pain_type>2,2,1))
+# heart_data2$chest_pain_type = as.factor(heart_data2$chest_pain_type)
+# 
+# #ekg results, 0 or 1 and 2 become 1
+# heart_data2$resting_ekg_results = as.integer(heart_data2$resting_ekg_results)
+# heart_data2 = heart_data2 %>% mutate(resting_ekg_results = ifelse(resting_ekg_results>1,1,0))
+# heart_data2$resting_ekg_results = as.factor(heart_data2$resting_ekg_results)
+# str(heart_data2)
+
+
+
+
+# #graph Variable P Values ---------------------------------------
+# coef_matrix = coef(summary(logistic_model))
+# coef_df = as.data.frame(coef_matrix)
+# coef_df = coef_df[-1,]
+# 
+# a = ifelse(coef_df$`Pr(>|z|)`<.05,"#16324F","#68C5DB")
+# a
+# 
+# coef_df %>% ggplot(aes(x=rownames(coef_df),y=`Pr(>|z|)`))+
+#   geom_bar(stat = "identity",fill=a) +
+#   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, color=a)) +
+#   geom_hline(yintercept = .05,color="#16324F") +
+#   geom_text(aes(22,.05,label="P-value <.05",vjust=-.6,hjust=1.1),size=3.5,color="#16324F")
+# 
+# #significant variables
+# coef_df[coef_df$`Pr(>|z|)`<.05,]
+
+#cross validation... ----------------------------------------
+#SVM, KNN, Logistic Regression
 
 ```
